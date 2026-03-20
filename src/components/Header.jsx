@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 
-export default function Header({ onExport, onImport, onClear }) {
+export default function Header({ onUndo, onRedo, canUndo, canRedo }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: -20 }}
@@ -21,12 +21,24 @@ export default function Header({ onExport, onImport, onClear }) {
           </div>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <button className="btn btn-outline" onClick={onExport}>↓ Export</button>
-          <label className="btn btn-outline" style={{ cursor: "pointer" }}>
-            ↑ Import
-            <input type="file" accept=".json" style={{ display: "none" }} onChange={e => onImport(e.target.files[0])} />
-          </label>
-          <button className="btn btn-red" onClick={onClear}>ล้างข้อมูล</button>
+          <motion.button
+            className="btn btn-outline"
+            onClick={onUndo}
+            disabled={!canUndo}
+            whileTap={canUndo ? { scale: 0.92 } : {}}
+            style={{ opacity: canUndo ? 1 : 0.35, cursor: canUndo ? "pointer" : "not-allowed" }}
+          >
+            ↩ Undo
+          </motion.button>
+          <motion.button
+            className="btn btn-outline"
+            onClick={onRedo}
+            disabled={!canRedo}
+            whileTap={canRedo ? { scale: 0.92 } : {}}
+            style={{ opacity: canRedo ? 1 : 0.35, cursor: canRedo ? "pointer" : "not-allowed" }}
+          >
+            ↪ Redo
+          </motion.button>
         </div>
       </div>
     </motion.div>

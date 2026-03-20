@@ -6,6 +6,8 @@ const DEFAULT_ACTUALS = {
   1: { sales: "5114", cash: "5725", ar: "8827", ap: "2258" },
 };
 
+const MAX_HISTORY = 50;
+
 export function useStore() {
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth());
   const [actuals, setActuals] = useState(() => ({ ...DEFAULT_ACTUALS }));
@@ -13,18 +15,49 @@ export function useStore() {
   const [lastSaved, setLastSaved] = useState(null);
   const saveTimer = useRef(null);
 
+  // Undo/Redo history
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const skipHistory = useRef(false);
+
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < history.length - 1;
+
+  // Push current state to history
+  const pushHistory = useCallback((newActuals, newNotes) => {
+    if (skipHistory.current) { skipHistory.current = false; return; }
+    setHistory(prev => {
+      const trimmed = prev.slice(0, historyIndex + 1);
+      const next = [...trimmed, { actuals: newActuals, notes: newNotes }];
+      if (next.length > MAX_HISTORY) next.shift();
+      return next;
+    });
+    setHistoryIndex(prev => Math.min(prev + 1, MAX_HISTORY - 1));
+  }, [historyIndex]);
+
   // Load from localStorage on mount
   useEffect(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
-        setActuals(prev => ({ ...DEFAULT_ACTUALS, ...prev, ...(saved.actuals || {}) }));
-        setNotes(saved.notes || {});
+        const loadedActuals = { ...DEFAULT_ACTUALS, ...(saved.actuals || {}) };
+        const loadedNotes = saved.notes || {};
+        setActuals(loadedActuals);
+        setNotes(loadedNotes);
         if (typeof saved.selectedMonth === "number") setSelectedMonth(saved.selectedMonth);
         if (saved.lastSaved) setLastSaved(saved.lastSaved);
+        // Init history with loaded state
+        setHistory([{ actuals: loadedActuals, notes: loadedNotes }]);
+        setHistoryIndex(0);
+      } else {
+        setHistory([{ actuals: { ...DEFAULT_ACTUALS }, notes: {} }]);
+        setHistoryIndex(0);
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      setHistory([{ actuals: { ...DEFAULT_ACTUALS }, notes: {} }]);
+      setHistoryIndex(0);
+    }
   }, []);
 
   // Debounced save to localStorage
@@ -47,62 +80,51 @@ export function useStore() {
   const updateActual = useCallback((month, key, value) => {
     setActuals(prev => {
       const next = { ...prev, [month]: { ...(prev[month] || {}), [key]: value } };
+      pushHistory(next, notes);
       save(next, notes, selectedMonth);
       return next;
     });
-  }, [notes, selectedMonth, save]);
+  }, [notes, selectedMonth, save, pushHistory]);
 
   const updateNote = useCallback((month, value) => {
     setNotes(prev => {
       const next = { ...prev, [month]: value };
+      pushHistory(actuals, next);
       save(actuals, next, selectedMonth);
       return next;
     });
-  }, [actuals, selectedMonth, save]);
+  }, [actuals, selectedMonth, save, pushHistory]);
 
   const selectMonth = useCallback((m) => {
     setSelectedMonth(m);
     save(actuals, notes, m);
   }, [actuals, notes, save]);
 
-  const exportData = useCallback(() => {
-    const data = { benchmark: "Sweetchew Plan B", exported: new Date().toISOString(), actuals, notes };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = "planb_benchmark_" + new Date().toISOString().slice(0, 10) + ".json";
-    a.click();
-  }, [actuals, notes]);
+  const undo = useCallback(() => {
+    if (!canUndo) return;
+    const newIndex = historyIndex - 1;
+    const snapshot = history[newIndex];
+    skipHistory.current = true;
+    setActuals(snapshot.actuals);
+    setNotes(snapshot.notes);
+    setHistoryIndex(newIndex);
+    save(snapshot.actuals, snapshot.notes, selectedMonth);
+  }, [canUndo, historyIndex, history, selectedMonth, save]);
 
-  const importData = useCallback((file) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const data = JSON.parse(e.target.result);
-        if (data.actuals) setActuals(prev => ({ ...prev, ...data.actuals }));
-        if (data.notes) setNotes(prev => ({ ...prev, ...data.notes }));
-        save(
-          { ...actuals, ...(data.actuals || {}) },
-          { ...notes, ...(data.notes || {}) },
-          selectedMonth
-        );
-        alert("นำเข้าข้อมูลสำเร็จ!");
-      } catch { alert("ไฟล์ไม่ถูกต้อง"); }
-    };
-    reader.readAsText(file);
-  }, [actuals, notes, selectedMonth, save]);
-
-  const clearData = useCallback(() => {
-    if (confirm("ล้างข้อมูลทั้งหมด? (ยกเว้น ม.ค.-ก.พ. ที่เป็น actual)")) {
-      setActuals({ ...DEFAULT_ACTUALS });
-      setNotes({});
-      save({ ...DEFAULT_ACTUALS }, {}, selectedMonth);
-    }
-  }, [selectedMonth, save]);
+  const redo = useCallback(() => {
+    if (!canRedo) return;
+    const newIndex = historyIndex + 1;
+    const snapshot = history[newIndex];
+    skipHistory.current = true;
+    setActuals(snapshot.actuals);
+    setNotes(snapshot.notes);
+    setHistoryIndex(newIndex);
+    save(snapshot.actuals, snapshot.notes, selectedMonth);
+  }, [canRedo, historyIndex, history, selectedMonth, save]);
 
   return {
     selectedMonth, actuals, notes, lastSaved,
     selectMonth, updateActual, updateNote,
-    exportData, importData, clearData
+    undo, redo, canUndo, canRedo
   };
 }

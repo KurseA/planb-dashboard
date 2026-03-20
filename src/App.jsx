@@ -15,9 +15,10 @@ export default function App() {
   return (
     <div className="wrap">
       <Header
-        onExport={store.exportData}
-        onImport={store.importData}
-        onClear={store.clearData}
+        onUndo={store.undo}
+        onRedo={store.redo}
+        canUndo={store.canUndo}
+        canRedo={store.canRedo}
       />
       <MetricCards month={store.selectedMonth} />
       <ProgressBar month={store.selectedMonth} onSelectMonth={store.selectMonth} />
