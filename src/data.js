@@ -8,7 +8,8 @@ export const D = {
   arMax: [7899, 7671, 11120, 11120, 6495, 7707, 11120, 5791, 7536, 11120, 11120, 6344],
   apMin: [3697, 3590, 4500, 4500, 3000, 3600, 4500, 2700, 3500, 4500, 4500, 2900],
   dirBal: [4951, 4715, 3751, 2315, 2079, 1844, 1608, 1372, 336, 0, 0, 0],
-  dirExtra: [0, 0, 1200, 1200, 0, 0, 0, 0, 800, 100, 0, 0],
+  dirExtraSuggested: [0, 0, 1200, 1200, 0, 0, 0, 0, 800, 100, 0, 0],
+  dirExtra: [0, 0, 1200, 1200, 0, 0, 0, 0, 800, 100, 0, 0], // kept for backward compat
   dirTotal: [236, 236, 1436, 1436, 236, 236, 236, 236, 1036, 336, 0, 0],
   phase: ["ปกติ", "ปกติ", "โปะ 1.2M", "โปะ 1.2M", "ปกติ", "ปกติ", "ปกติ", "⚡ ระวัง cash", "โปะ 800K", "โปะ 100K", "หมดแล้ว!", "หมดแล้ว!"],
 
@@ -25,6 +26,83 @@ export const D = {
 export const STORAGE_KEY = "swc_planb_benchmark_v2";
 
 export const TOTAL_DEBT = 5187;
+export const BASE_PAYMENT = 236;
+
+// คำนวณแผนชำระหนี้แบบ dynamic
+// ถ้ากรอก actualPayment → ใช้ยอดจริง, ถ้าไม่กรอก → ใช้ suggested
+export function calculateDebtPlan(actuals) {
+  let remaining = TOTAL_DEBT;
+  const plan = [];
+
+  // เดือนที่มี extra suggested และยังไม่ได้กรอก actual
+  const extraMonths = [2, 3, 8, 9]; // มี.ค., เม.ย., ก.ย., ต.ค.
+
+  for (let m = 0; m < 12; m++) {
+    const actualPaymentStr = actuals[m]?.actualPayment;
+    const hasActual = actualPaymentStr !== undefined && actualPaymentStr !== "";
+    const actualPayment = hasActual ? parseFloat(actualPaymentStr) : NaN;
+
+    const suggestedExtra = D.dirExtraSuggested[m];
+    const suggestedTotal = BASE_PAYMENT + suggestedExtra;
+
+    let paid;
+    if (hasActual && !isNaN(actualPayment)) {
+      paid = actualPayment;
+    } else {
+      paid = suggestedTotal;
+    }
+
+    remaining = Math.max(0, remaining - paid);
+
+    plan.push({
+      month: m,
+      suggestedExtra,
+      suggestedTotal,
+      actualPayment: hasActual && !isNaN(actualPayment) ? actualPayment : null,
+      paid,
+      remaining,
+      hasActual: hasActual && !isNaN(actualPayment),
+    });
+  }
+
+  // คำนวณ redistributed suggestion สำหรับเดือนที่ยังไม่กรอก
+  // = หนี้เหลือ ÷ จำนวนเดือนข้างหน้าที่ยังไม่กรอก (รวม base payment)
+  const lastActualMonth = plan.reduce((last, p) => p.hasActual ? p.month : last, -1);
+  const remainingAfterActuals = lastActualMonth >= 0 ? plan[lastActualMonth].remaining : TOTAL_DEBT;
+  const futureMonths = 12 - (lastActualMonth + 1);
+
+  if (futureMonths > 0 && remainingAfterActuals > 0) {
+    const totalFutureBase = futureMonths * BASE_PAYMENT;
+    const needExtra = remainingAfterActuals - totalFutureBase;
+
+    // หาเดือนที่มี extra slot ข้างหน้า
+    const futureExtraMonths = extraMonths.filter(em => em > lastActualMonth && !plan[em].hasActual);
+
+    if (futureExtraMonths.length > 0 && needExtra > 0) {
+      const perMonth = Math.ceil(needExtra / futureExtraMonths.length);
+      for (const em of futureExtraMonths) {
+        plan[em].redistributedExtra = Math.max(perMonth, 0);
+      }
+    }
+  }
+
+  // Recalculate remaining with redistributed suggestions
+  remaining = TOTAL_DEBT;
+  for (let m = 0; m < 12; m++) {
+    const p = plan[m];
+    if (p.hasActual) {
+      remaining = Math.max(0, remaining - p.actualPayment);
+    } else {
+      const extra = p.redistributedExtra ?? p.suggestedExtra;
+      remaining = Math.max(0, remaining - (BASE_PAYMENT + extra));
+    }
+    p.remaining = remaining;
+    p.effectiveExtra = p.hasActual ? Math.max(0, p.actualPayment - BASE_PAYMENT) : (p.redistributedExtra ?? p.suggestedExtra);
+    p.effectiveTotal = p.hasActual ? p.actualPayment : (BASE_PAYMENT + p.effectiveExtra);
+  }
+
+  return plan;
+}
 
 export function fmt(n) {
   if (n === 0) return "0";
@@ -64,22 +142,22 @@ export function earlyWarningCheck(actuals, m) {
   return { checks, passed, total: filled.length, signal };
 }
 
-export function payoffDecision(actuals, m) {
-  const extra = D.dirExtra[m];
-  if (extra === 0) return { action: "regular", amount: 236 };
+export function payoffDecision(actuals, m, debtPlan) {
+  const extra = debtPlan ? debtPlan[m].effectiveExtra : D.dirExtraSuggested[m];
+  if (extra === 0) return { action: "regular", amount: BASE_PAYMENT };
 
   const early = earlyWarningCheck(actuals, m);
   const final = monthStatus(actuals, m);
 
-  if (early.signal === "red") return { action: "blocked", amount: 236, reason: "early-warning-red" };
+  if (early.signal === "red") return { action: "blocked", amount: BASE_PAYMENT, reason: "early-warning-red" };
 
   if (final && final.checked >= 3) {
     if (final.passed >= 4) return { action: "full", amount: extra };
     if (final.passed >= 3) return { action: "half", amount: Math.round(extra / 2) };
-    return { action: "regular", amount: 236 };
+    return { action: "regular", amount: BASE_PAYMENT };
   }
 
-  return { action: "waiting", signal: early.signal };
+  return { action: "waiting", signal: early.signal, suggestedExtra: extra };
 }
 
 export function monthStatus(actuals, m) {

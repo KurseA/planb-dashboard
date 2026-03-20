@@ -1,7 +1,7 @@
 import { motion } from "framer-motion";
-import { D, monthStatus } from "../data";
+import { D, fmt, monthStatus } from "../data";
 
-export default function YearTable({ month, actuals, onSelectMonth }) {
+export default function YearTable({ month, actuals, debtPlan, onSelectMonth }) {
   return (
     <motion.div
       className="card"
@@ -23,7 +23,8 @@ export default function YearTable({ month, actuals, onSelectMonth }) {
             <th style={{ color: "var(--green2)" }}>Cash min</th>
             <th style={{ color: "var(--amber2)" }}>AR max</th>
             <th style={{ color: "var(--purple)" }}>AP min</th>
-            <th style={{ color: "var(--red2)" }}>โปะเพิ่ม</th>
+            <th style={{ color: "var(--amber2)" }}>โปะแนะนำ</th>
+            <th style={{ color: "var(--green2)" }}>จ่ายจริง</th>
             <th style={{ color: "var(--red2)" }}>หนี้เหลือ</th>
             <th style={{ textAlign: "center" }}>สถานะ</th>
           </tr>
@@ -31,8 +32,10 @@ export default function YearTable({ month, actuals, onSelectMonth }) {
         <tbody>
           {D.months.map((mo, i) => {
             const sel = i === month;
-            const isExtra = D.dirExtra[i] > 0;
-            const done = D.dirBal[i] === 0;
+            const p = debtPlan[i];
+            const extra = p.redistributedExtra ?? p.suggestedExtra;
+            const isExtra = extra > 0;
+            const done = p.remaining === 0;
             const st = monthStatus(actuals, i);
 
             return (
@@ -55,10 +58,14 @@ export default function YearTable({ month, actuals, onSelectMonth }) {
                 <td>{D.arMax[i].toLocaleString()}</td>
                 <td>{D.apMin[i].toLocaleString()}</td>
                 <td style={{ color: isExtra ? "var(--amber2)" : "var(--t5)", fontWeight: isExtra ? 600 : 400 }}>
-                  {isExtra ? D.dirExtra[i].toLocaleString() : "—"}
+                  {isExtra ? extra.toLocaleString() : "—"}
+                  {p.redistributedExtra && <span style={{ fontSize: 8, color: "var(--t4)" }}> *</span>}
+                </td>
+                <td style={{ color: p.hasActual ? "var(--green2)" : "var(--t5)", fontWeight: p.hasActual ? 500 : 400 }}>
+                  {p.hasActual ? p.actualPayment.toLocaleString() : "—"}
                 </td>
                 <td style={{ color: done ? "var(--green2)" : "var(--t1)", fontWeight: done ? 600 : 400 }}>
-                  {done ? "0 ✓" : D.dirBal[i].toLocaleString()}
+                  {done ? "0 ✓" : p.remaining.toLocaleString()}
                 </td>
                 <td style={{ textAlign: "center" }}>
                   <span className={`badge ${done ? "badge-done" : isExtra ? "badge-extra" : i === 7 ? "badge-warn" : ""}`} style={{ fontSize: 10 }}>
@@ -75,6 +82,9 @@ export default function YearTable({ month, actuals, onSelectMonth }) {
           })}
         </tbody>
       </table>
+      <div style={{ marginTop: 8, fontSize: 9, color: "var(--t5)", fontFamily: "var(--thai)" }}>
+        * ยอดโปะปรับใหม่จากที่จ่ายจริงเดือนก่อน
+      </div>
     </motion.div>
   );
 }

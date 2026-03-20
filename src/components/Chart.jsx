@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { D } from "../data";
 
-export default function Chart({ month, actuals }) {
+export default function Chart({ month, actuals, debtPlan }) {
   const containerRef = useRef(null);
   const [width, setWidth] = useState(0);
 
@@ -84,22 +84,25 @@ export default function Chart({ month, actuals }) {
           <rect x={barX(m) - 4} y={pad.t} width={barW() + 8} height={ch} rx={4} fill="rgba(29,158,117,0.06)" stroke="var(--green)" strokeWidth={0.5} strokeDasharray="3,3" />
 
           {/* Director balance bars */}
-          {D.dirBal.map((b, i) => (
-            <motion.rect
-              key={i}
-              x={barX(i)}
-              y={y(b)}
-              width={barW()}
-              height={(b / maxVal) * ch}
-              rx={3}
-              fill="rgba(217,119,6,0.25)"
-              stroke={D.dirExtra[i] > 0 ? "#D97706" : "none"}
-              strokeWidth={D.dirExtra[i] > 0 ? 1 : 0}
-              initial={{ height: 0, y: y(0) }}
-              animate={{ height: (b / maxVal) * ch, y: y(b) }}
-              transition={{ duration: 0.8, delay: i * 0.04 }}
-            />
-          ))}
+          {debtPlan.map((p, i) => {
+            const b = p.remaining;
+            return (
+              <motion.rect
+                key={i}
+                x={barX(i)}
+                y={y(b)}
+                width={barW()}
+                height={(b / maxVal) * ch}
+                rx={3}
+                fill={p.hasActual ? "rgba(74,222,128,0.2)" : "rgba(217,119,6,0.25)"}
+                stroke={p.hasActual ? "var(--green)" : (p.effectiveExtra > 0 ? "#D97706" : "none")}
+                strokeWidth={p.hasActual || p.effectiveExtra > 0 ? 1 : 0}
+                initial={{ height: 0, y: y(0) }}
+                animate={{ height: (b / maxVal) * ch, y: y(b) }}
+                transition={{ duration: 0.8, delay: i * 0.04 }}
+              />
+            );
+          })}
 
           {/* Cash min dashed */}
           <polyline fill="none" stroke="var(--red)" strokeWidth={1} strokeDasharray="4,4" opacity={0.4} points={minPts} />

@@ -10,26 +10,31 @@ const item = {
   show: { opacity: 1, y: 0, scale: 1, transition: { type: "spring", stiffness: 300, damping: 20 } }
 };
 
-export default function MetricCards({ month }) {
+export default function MetricCards({ month, debtPlan }) {
   const m = month;
-  const pctPaid = (TOTAL_DEBT - (D.dirBal[m] || 0)) / TOTAL_DEBT * 100;
+  const p = debtPlan[m];
+  const remaining = p.remaining;
+  const pctPaid = (TOTAL_DEBT - remaining) / TOTAL_DEBT * 100;
+  const suggestedExtra = p.redistributedExtra ?? p.suggestedExtra;
 
   const cards = [
     {
       label: "ยอดหนี้เหลือ",
-      value: fmt(D.dirBal[m]),
-      sub: D.dirBal[m] === 0 ? "ปิดหนี้แล้ว!" : `เป้า ${D.months[m]}: ${fmt(D.dirBal[m])}`,
-      accent: D.dirBal[m] === 0
+      value: fmt(remaining),
+      sub: remaining === 0 ? "ปิดหนี้แล้ว!" : `${D.months[m]}: ${p.hasActual ? "จ่ายจริง" : "ตามแผน"}`,
+      accent: remaining === 0
     },
     {
       label: "ชำระแล้ว",
       value: `${pctPaid.toFixed(0)}%`,
-      sub: `${fmt(TOTAL_DEBT - (D.dirBal[m] || 0))} จาก 5.19M`
+      sub: `${fmt(TOTAL_DEBT - remaining)} จาก 5.19M`
     },
     {
       label: "โปะเพิ่มเดือนนี้",
-      value: D.dirExtra[m] > 0 ? fmt(D.dirExtra[m]) : "—",
-      sub: D.dirExtra[m] > 0 ? "ถ้า benchmark ผ่าน" : "จ่ายปกติ 236K"
+      value: suggestedExtra > 0 ? fmt(suggestedExtra) : "—",
+      sub: suggestedExtra > 0
+        ? (p.hasActual ? `จ่ายจริง ${fmt(p.actualPayment)}` : "แนะนำ (Suggested)")
+        : "จ่ายปกติ 236K"
     },
     {
       label: "Cash เป้าหมาย",

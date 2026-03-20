@@ -1,9 +1,10 @@
 import { motion } from "framer-motion";
 import { D, fmt, TOTAL_DEBT } from "../data";
 
-export default function ProgressBar({ month, onSelectMonth }) {
+export default function ProgressBar({ month, debtPlan, onSelectMonth }) {
   const m = month;
-  const pctPaid = (TOTAL_DEBT - (D.dirBal[m] || 0)) / TOTAL_DEBT * 100;
+  const remaining = debtPlan[m].remaining;
+  const pctPaid = (TOTAL_DEBT - remaining) / TOTAL_DEBT * 100;
 
   return (
     <motion.div
@@ -15,7 +16,7 @@ export default function ProgressBar({ month, onSelectMonth }) {
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
         <span style={{ fontSize: 12, color: "var(--t3)", fontFamily: "var(--thai)" }}>ความคืบหน้าชำระหนี้กรรมการ</span>
-        <span style={{ fontSize: 12, color: "var(--green2)", fontWeight: 500 }}>{fmt(TOTAL_DEBT - (D.dirBal[m] || 0))} / 5.19M</span>
+        <span style={{ fontSize: 12, color: "var(--green2)", fontWeight: 500 }}>{fmt(TOTAL_DEBT - remaining)} / 5.19M</span>
       </div>
       <div className="progress-bar">
         <motion.div
@@ -26,24 +27,29 @@ export default function ProgressBar({ month, onSelectMonth }) {
         />
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-        {D.months.map((mo, i) => (
-          <div
-            key={i}
-            onClick={() => onSelectMonth(i)}
-            style={{
-              fontSize: 9,
-              textAlign: "center",
-              color: i === m ? "var(--green2)" : i <= m ? "var(--t4)" : "var(--t5)",
-              fontWeight: i === m ? 600 : 400,
-              cursor: "pointer",
-              padding: "2px 0",
-              borderBottom: D.dirExtra[i] > 0 ? "2px solid var(--amber)" : "none"
-            }}
-          >
-            {mo.replace(".", "")}
-            {D.dirExtra[i] > 0 && <><br /><span style={{ color: "var(--amber)", fontSize: 8 }}>โปะ</span></>}
-          </div>
-        ))}
+        {D.months.map((mo, i) => {
+          const p = debtPlan[i];
+          const hasExtra = (p.redistributedExtra ?? p.suggestedExtra) > 0;
+          return (
+            <div
+              key={i}
+              onClick={() => onSelectMonth(i)}
+              style={{
+                fontSize: 9,
+                textAlign: "center",
+                color: i === m ? "var(--green2)" : i <= m ? "var(--t4)" : "var(--t5)",
+                fontWeight: i === m ? 600 : 400,
+                cursor: "pointer",
+                padding: "2px 0",
+                borderBottom: hasExtra ? "2px solid var(--amber)" : p.hasActual ? "2px solid var(--green)" : "none"
+              }}
+            >
+              {mo.replace(".", "")}
+              {hasExtra && <><br /><span style={{ color: "var(--amber)", fontSize: 8 }}>โปะ</span></>}
+              {!hasExtra && p.hasActual && <><br /><span style={{ color: "var(--green)", fontSize: 8 }}>✓</span></>}
+            </div>
+          );
+        })}
       </div>
     </motion.div>
   );

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { D, fmt, fmtFull, checkMetric, monthStatus, earlyWarningCheck, payoffDecision } from "../data";
+import { D, fmt, fmtFull, checkMetric, monthStatus, earlyWarningCheck, payoffDecision, BASE_PAYMENT } from "../data";
 
 function ActualInput({ value, onChange, placeholder = "—", disabled = false }) {
   const [local, setLocal] = useState(value);
@@ -217,10 +217,78 @@ function CashFlowSection({ month, actuals, onUpdateActual }) {
   );
 }
 
-export default function BenchmarkTable({ month, actuals, notes, onUpdateActual, onUpdateNote }) {
+function PaymentSection({ month, actuals, debtPlan, onUpdateActual }) {
+  const m = month;
+  const p = debtPlan[m];
+  const prevRemaining = m > 0 ? debtPlan[m - 1].remaining : 5187;
+  const suggestedExtra = p.redistributedExtra ?? p.suggestedExtra;
+  const suggestedTotal = BASE_PAYMENT + suggestedExtra;
+  const actualVal = actuals[m]?.actualPayment || "";
+
+  return (
+    <motion.div
+      style={{ marginBottom: 16, padding: "16px 18px", background: "linear-gradient(135deg, #0d1a14, #0d1117)", borderRadius: 10, border: "1px solid var(--green)", borderLeftWidth: 3 }}
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.3 }}
+    >
+      <div style={{ fontSize: 13, fontWeight: 500, color: "var(--green2)", marginBottom: 12, fontFamily: "var(--thai)" }}>
+        💳 ยอดชำระหนี้เดือนนี้
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div>
+          <div style={{ fontSize: 10, color: "var(--t4)", textTransform: "uppercase", marginBottom: 2 }}>หนี้ก่อนจ่าย</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: "var(--t1)" }}>{fmt(prevRemaining)}</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 10, color: "var(--t4)", textTransform: "uppercase", marginBottom: 2 }}>หนี้หลังจ่าย</div>
+          <div style={{ fontSize: 18, fontWeight: 600, color: p.remaining === 0 ? "var(--green2)" : "var(--t1)" }}>{fmt(p.remaining)}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        <div style={{ flex: 1, minWidth: 140 }}>
+          <div style={{ fontSize: 10, color: "var(--t4)", marginBottom: 4, fontFamily: "var(--thai)" }}>
+            Suggested: <span style={{ color: "var(--amber2)" }}>{fmt(suggestedTotal)}</span>
+            {suggestedExtra > 0 && <span style={{ color: "var(--t5)" }}> (ปกติ {fmt(BASE_PAYMENT)} + โปะ {fmt(suggestedExtra)})</span>}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 12, color: "var(--t3)", fontFamily: "var(--thai)" }}>จ่ายจริง:</span>
+            <ActualInput
+              value={actualVal}
+              onChange={v => onUpdateActual(m, "actualPayment", v)}
+              placeholder={suggestedTotal.toString()}
+            />
+            <span style={{ fontSize: 11, color: "var(--t4)" }}>พัน฿</span>
+          </div>
+        </div>
+        {p.hasActual && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            style={{
+              padding: "6px 12px", borderRadius: 6, fontSize: 11, fontFamily: "var(--thai)",
+              background: p.actualPayment >= suggestedTotal ? "rgba(29,158,117,0.1)" : "var(--amber-bg)",
+              color: p.actualPayment >= suggestedTotal ? "var(--green2)" : "var(--amber2)"
+            }}
+          >
+            {p.actualPayment >= suggestedTotal
+              ? `✓ จ่ายครบ${p.actualPayment > suggestedTotal ? " (เกิน " + fmt(p.actualPayment - suggestedTotal) + ")" : ""}`
+              : `↓ จ่ายน้อยกว่า ${fmt(suggestedTotal - p.actualPayment)}`
+            }
+          </motion.div>
+        )}
+      </div>
+    </motion.div>
+  );
+}
+
+export default function BenchmarkTable({ month, actuals, notes, debtPlan, onUpdateActual, onUpdateNote }) {
   const m = month;
   const ms = monthStatus(actuals, m);
-  const decision = useMemo(() => payoffDecision(actuals, m), [actuals, m]);
+  const decision = useMemo(() => payoffDecision(actuals, m, debtPlan), [actuals, m, debtPlan]);
+  const p = debtPlan[m];
+  const suggestedExtra = p.redistributedExtra ?? p.suggestedExtra;
 
   const rows = [
     { key: "sales", label: "Sales ยอดขาย", half: D.halfSales[m], full: D.salesTarget[m], rule: "≥", color: "var(--blue)" },
@@ -242,16 +310,20 @@ export default function BenchmarkTable({ month, actuals, notes, onUpdateActual, 
         <div>
           <span style={{ fontSize: 18, fontWeight: 600, color: "var(--t1)", fontFamily: "var(--thai)" }}>{D.months[m]} 2569</span>
           <span
-            className={`badge ${D.dirExtra[m] > 0 ? "badge-extra" : D.dirBal[m] === 0 ? "badge-done" : "badge-warn"}`}
+            className={`badge ${suggestedExtra > 0 ? "badge-extra" : p.remaining === 0 ? "badge-done" : "badge-warn"}`}
             style={{ marginLeft: 10, fontSize: 11, padding: "3px 10px" }}
           >
             {D.phase[m]}
           </span>
         </div>
         <div style={{ fontSize: 12, color: "var(--t4)" }}>
-          จ่ายรวม: <span style={{ color: "var(--t1)", fontWeight: 500 }}>{fmtFull(D.dirTotal[m])} ฿</span>
+          จ่ายรวม: <span style={{ color: "var(--t1)", fontWeight: 500 }}>{fmtFull(p.effectiveTotal)} ฿</span>
+          {p.hasActual && <span style={{ color: "var(--green2)", marginLeft: 4 }}>(จริง)</span>}
         </div>
       </div>
+
+      {/* Payment Section */}
+      <PaymentSection month={m} actuals={actuals} debtPlan={debtPlan} onUpdateActual={onUpdateActual} />
 
       {/* Early Warning Section */}
       <EarlyWarningSection month={m} actuals={actuals} onUpdateActual={onUpdateActual} />
@@ -305,7 +377,7 @@ export default function BenchmarkTable({ month, actuals, notes, onUpdateActual, 
 
       {/* Decision Box — 2 ชั้น */}
       <AnimatePresence>
-        {D.dirExtra[m] > 0 && (
+        {suggestedExtra > 0 && (
           <motion.div
             className="decision"
             initial={{ opacity: 0, height: 0 }}
@@ -314,56 +386,41 @@ export default function BenchmarkTable({ month, actuals, notes, onUpdateActual, 
             transition={{ duration: 0.3 }}
           >
             <div style={{ fontSize: 12, color: "var(--amber2)", fontWeight: 500, marginBottom: 4, fontFamily: "var(--thai)" }}>
-              การตัดสินใจโปะเพิ่ม {fmtFull(D.dirExtra[m])} ฿
+              แนะนำโปะเพิ่ม {fmtFull(suggestedExtra)} ฿
+              {p.redistributedExtra && <span style={{ fontSize: 10, color: "var(--t4)", marginLeft: 6 }}>(ปรับจากแผนเดิม {fmtFull(D.dirExtraSuggested[m])})</span>}
             </div>
             <div style={{ fontSize: 11, color: "#A88544", lineHeight: 1.7, fontFamily: "var(--thai)" }}>
               ชั้น 1: Early Warning (วันที่ 10) → ถ้าแดงไม่โปะเลย &nbsp;|&nbsp;
               ชั้น 2: Final Check → 4/4 โปะเต็ม | 3/4 โปะ 50% | ≤2/4 จ่ายปกติ
             </div>
 
-            {/* Decision Result */}
             {decision.action === "blocked" && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 12, fontFamily: "var(--thai)", background: "var(--red-bg)", color: "var(--red2)" }}
-              >
-                🔴 Early Warning ไม่ผ่าน → <strong>ไม่โปะ จ่ายเฉพาะปกติ 235,750 ฿</strong>
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 12, fontFamily: "var(--thai)", background: "var(--red-bg)", color: "var(--red2)" }}>
+                🔴 Early Warning ไม่ผ่าน → <strong>ไม่โปะ จ่ายเฉพาะปกติ {fmtFull(BASE_PAYMENT)} ฿</strong>
               </motion.div>
             )}
             {decision.action === "full" && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 12, fontFamily: "var(--thai)", background: "rgba(29,158,117,0.1)", color: "var(--green2)" }}
-              >
-                ✅ ผ่านทั้ง 2 ชั้น → <strong>โปะเต็มจำนวน {fmtFull(D.dirExtra[m])} ฿</strong>
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 12, fontFamily: "var(--thai)", background: "rgba(29,158,117,0.1)", color: "var(--green2)" }}>
+                ✅ ผ่านทั้ง 2 ชั้น → <strong>โปะเต็มจำนวน {fmtFull(suggestedExtra)} ฿</strong>
               </motion.div>
             )}
             {decision.action === "half" && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 12, fontFamily: "var(--thai)", background: "var(--amber-bg)", color: "var(--amber2)" }}
-              >
-                ⚠️ Final 3/4 ผ่าน → <strong>โปะ 50% = {fmtFull(D.dirExtra[m] / 2)} ฿</strong>
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 12, fontFamily: "var(--thai)", background: "var(--amber-bg)", color: "var(--amber2)" }}>
+                ⚠️ Final 3/4 ผ่าน → <strong>โปะ 50% = {fmtFull(suggestedExtra / 2)} ฿</strong>
               </motion.div>
             )}
             {decision.action === "regular" && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 12, fontFamily: "var(--thai)", background: "var(--red-bg)", color: "var(--red2)" }}
-              >
-                ⛔ Final ≤2/4 → <strong>จ่ายเฉพาะปกติ 235,750 ฿</strong>
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 12, fontFamily: "var(--thai)", background: "var(--red-bg)", color: "var(--red2)" }}>
+                ⛔ Final ≤2/4 → <strong>จ่ายเฉพาะปกติ {fmtFull(BASE_PAYMENT)} ฿</strong>
               </motion.div>
             )}
             {decision.action === "waiting" && (
-              <motion.div
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 12, fontFamily: "var(--thai)", background: "rgba(255,255,255,0.03)", color: "var(--t3)" }}
-              >
+              <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                style={{ marginTop: 8, padding: "8px 12px", borderRadius: 6, fontSize: 12, fontFamily: "var(--thai)", background: "rgba(255,255,255,0.03)", color: "var(--t3)" }}>
                 ⏳ รอ Final Check — Early Warning: {decision.signal === "green" ? "🟢 พร้อม" : "🟡 ระวัง"}
               </motion.div>
             )}
