@@ -1,13 +1,16 @@
 import { motion } from "framer-motion";
-import { D, monthStatus } from "../data";
+import { D, monthStatus, earlyWarningCheck } from "../data";
 
 export default function MonthTabs({ month, actuals, onSelectMonth }) {
   return (
     <div className="month-tabs">
       {D.months.map((mo, i) => {
         const st = monthStatus(actuals, i);
+        const ew = earlyWarningCheck(actuals, i);
         const isExtra = D.dirExtra[i] > 0;
         const active = i === month;
+
+        const ewColor = { green: "var(--green)", yellow: "var(--amber)", red: "var(--red)", pending: null }[ew.signal];
 
         return (
           <motion.button
@@ -19,6 +22,14 @@ export default function MonthTabs({ month, actuals, onSelectMonth }) {
             layout
           >
             {mo}
+            {/* Early Warning dot (left) */}
+            {ewColor && (
+              <span
+                className="dot"
+                style={{ background: ewColor, right: st ? 10 : -3 }}
+              />
+            )}
+            {/* Final Check dot (right) */}
             {st && (
               <span
                 className="dot"
