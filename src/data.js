@@ -48,33 +48,28 @@ export function calculateDebtPlan(actuals) {
     });
   }
 
-  // Pass 1: คำนวณ targetExtra (redistribute) — ยึดตามหนี้เหลือหลังเดือนที่กรอก actual ต่อเนื่อง
-  // หา "เดือนล่าสุดที่มี actual ต่อเนื่องจากต้นปี" (ไม่ใช่แค่เดือนสุดท้ายที่มี actual)
-  let remainingForRedist = TOTAL_DEBT;
-  let lastContiguousActual = -1;
+  // Pass 1: คำนวณหนี้เหลือ สมมติเดือนที่ไม่กรอกจ่ายแค่ base
+  // แล้ว redistribute ส่วนที่เหลือให้ extra slots ที่ยังไม่กรอก
+  let debtAfterBase = TOTAL_DEBT;
   for (let m = 0; m < 12; m++) {
     if (plan[m].hasActual) {
-      remainingForRedist = Math.max(0, remainingForRedist - plan[m].actualPayment);
-      lastContiguousActual = m;
+      debtAfterBase = Math.max(0, debtAfterBase - plan[m].actualPayment);
     } else {
-      // ถ้าเจอเดือนว่าง → หยุดนับ contiguous
-      break;
+      debtAfterBase = Math.max(0, debtAfterBase - BASE_PAYMENT);
     }
   }
+  // debtAfterBase = หนี้เหลือถ้าเดือนที่ไม่กรอกจ่ายแค่ base (ไม่โปะ)
 
-  // คำนวณ redistribute สำหรับเดือนข้างหน้า (ทุกเดือนที่มี extra slot รวมที่กรอก actual แล้ว)
-  const futureMonthCount = 12 - (lastContiguousActual + 1);
-  if (futureMonthCount > 0 && remainingForRedist > 0) {
-    const totalFutureBase = futureMonthCount * BASE_PAYMENT;
-    const needExtra = remainingForRedist - totalFutureBase;
-    // extra slot ข้างหน้า — รวมทุกเดือนที่มี slot ไม่ว่ากรอก actual หรือยัง
-    const futureExtraSlots = extraMonths.filter(em => em > lastContiguousActual);
-
-    if (futureExtraSlots.length > 0 && needExtra > 0) {
-      const perMonth = Math.ceil(needExtra / futureExtraSlots.length);
-      for (const em of futureExtraSlots) {
-        plan[em].targetExtra = Math.max(perMonth, 0);
-      }
+  const openSlots = extraMonths.filter(em => !plan[em].hasActual);
+  if (openSlots.length > 0 && debtAfterBase > 0) {
+    const perSlot = Math.ceil(debtAfterBase / openSlots.length);
+    for (const em of openSlots) {
+      plan[em].targetExtra = Math.max(perSlot, 0);
+    }
+  } else if (debtAfterBase <= 0) {
+    // หนี้หมดแล้วจาก actual ที่จ่าย → ไม่ต้องโปะเพิ่ม
+    for (const em of openSlots) {
+      plan[em].targetExtra = 0;
     }
   }
 
