@@ -29,7 +29,7 @@ export default function ProgressBar({ month, debtPlan, onSelectMonth }) {
       <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
         {D.months.map((mo, i) => {
           const p = debtPlan[i];
-          const hasExtra = (p.redistributedExtra ?? p.suggestedExtra) > 0;
+          const hasExtra = p.targetExtra > 0;
           return (
             <div
               key={i}

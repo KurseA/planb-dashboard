@@ -31,74 +31,66 @@ export const BASE_PAYMENT = 236;
 // คำนวณแผนชำระหนี้แบบ dynamic
 // ถ้ากรอก actualPayment → ใช้ยอดจริง, ถ้าไม่กรอก → ใช้ suggested
 export function calculateDebtPlan(actuals) {
-  let remaining = TOTAL_DEBT;
+  const extraMonths = [2, 3, 8, 9]; // มี.ค., เม.ย., ก.ย., ต.ค.
   const plan = [];
 
-  // เดือนที่มี extra suggested และยังไม่ได้กรอก actual
-  const extraMonths = [2, 3, 8, 9]; // มี.ค., เม.ย., ก.ย., ต.ค.
-
+  // Parse actuals ก่อน
   for (let m = 0; m < 12; m++) {
     const actualPaymentStr = actuals[m]?.actualPayment;
     const hasActual = actualPaymentStr !== undefined && actualPaymentStr !== "";
     const actualPayment = hasActual ? parseFloat(actualPaymentStr) : NaN;
-
-    const suggestedExtra = D.dirExtraSuggested[m];
-    const suggestedTotal = BASE_PAYMENT + suggestedExtra;
-
-    let paid;
-    if (hasActual && !isNaN(actualPayment)) {
-      paid = actualPayment;
-    } else {
-      paid = suggestedTotal;
-    }
-
-    remaining = Math.max(0, remaining - paid);
-
     plan.push({
       month: m,
-      suggestedExtra,
-      suggestedTotal,
+      suggestedExtra: D.dirExtraSuggested[m],
       actualPayment: hasActual && !isNaN(actualPayment) ? actualPayment : null,
-      paid,
-      remaining,
       hasActual: hasActual && !isNaN(actualPayment),
+      targetExtra: D.dirExtraSuggested[m], // default = original suggested
     });
   }
 
-  // คำนวณ redistributed suggestion สำหรับเดือนที่ยังไม่กรอก
-  // = หนี้เหลือ ÷ จำนวนเดือนข้างหน้าที่ยังไม่กรอก (รวม base payment)
-  const lastActualMonth = plan.reduce((last, p) => p.hasActual ? p.month : last, -1);
-  const remainingAfterActuals = lastActualMonth >= 0 ? plan[lastActualMonth].remaining : TOTAL_DEBT;
-  const futureMonths = 12 - (lastActualMonth + 1);
+  // Pass 1: คำนวณ targetExtra (redistribute) — ยึดตามหนี้เหลือหลังเดือนที่กรอก actual ต่อเนื่อง
+  // หา "เดือนล่าสุดที่มี actual ต่อเนื่องจากต้นปี" (ไม่ใช่แค่เดือนสุดท้ายที่มี actual)
+  let remainingForRedist = TOTAL_DEBT;
+  let lastContiguousActual = -1;
+  for (let m = 0; m < 12; m++) {
+    if (plan[m].hasActual) {
+      remainingForRedist = Math.max(0, remainingForRedist - plan[m].actualPayment);
+      lastContiguousActual = m;
+    } else {
+      // ถ้าเจอเดือนว่าง → หยุดนับ contiguous
+      break;
+    }
+  }
 
-  if (futureMonths > 0 && remainingAfterActuals > 0) {
-    const totalFutureBase = futureMonths * BASE_PAYMENT;
-    const needExtra = remainingAfterActuals - totalFutureBase;
+  // คำนวณ redistribute สำหรับเดือนข้างหน้า (ทุกเดือนที่มี extra slot รวมที่กรอก actual แล้ว)
+  const futureMonthCount = 12 - (lastContiguousActual + 1);
+  if (futureMonthCount > 0 && remainingForRedist > 0) {
+    const totalFutureBase = futureMonthCount * BASE_PAYMENT;
+    const needExtra = remainingForRedist - totalFutureBase;
+    // extra slot ข้างหน้า — รวมทุกเดือนที่มี slot ไม่ว่ากรอก actual หรือยัง
+    const futureExtraSlots = extraMonths.filter(em => em > lastContiguousActual);
 
-    // หาเดือนที่มี extra slot ข้างหน้า
-    const futureExtraMonths = extraMonths.filter(em => em > lastActualMonth && !plan[em].hasActual);
-
-    if (futureExtraMonths.length > 0 && needExtra > 0) {
-      const perMonth = Math.ceil(needExtra / futureExtraMonths.length);
-      for (const em of futureExtraMonths) {
-        plan[em].redistributedExtra = Math.max(perMonth, 0);
+    if (futureExtraSlots.length > 0 && needExtra > 0) {
+      const perMonth = Math.ceil(needExtra / futureExtraSlots.length);
+      for (const em of futureExtraSlots) {
+        plan[em].targetExtra = Math.max(perMonth, 0);
       }
     }
   }
 
-  // Recalculate remaining with redistributed suggestions
-  remaining = TOTAL_DEBT;
+  // Pass 2: คำนวณ remaining จริง — ใช้ actual ถ้ามี, ไม่งั้นใช้ targetExtra
+  let remaining = TOTAL_DEBT;
   for (let m = 0; m < 12; m++) {
     const p = plan[m];
     if (p.hasActual) {
       remaining = Math.max(0, remaining - p.actualPayment);
     } else {
-      const extra = p.redistributedExtra ?? p.suggestedExtra;
-      remaining = Math.max(0, remaining - (BASE_PAYMENT + extra));
+      remaining = Math.max(0, remaining - (BASE_PAYMENT + p.targetExtra));
     }
     p.remaining = remaining;
-    p.effectiveExtra = p.hasActual ? Math.max(0, p.actualPayment - BASE_PAYMENT) : (p.redistributedExtra ?? p.suggestedExtra);
-    p.effectiveTotal = p.hasActual ? p.actualPayment : (BASE_PAYMENT + p.effectiveExtra);
+    p.effectiveExtra = p.hasActual ? Math.max(0, p.actualPayment - BASE_PAYMENT) : p.targetExtra;
+    p.effectiveTotal = p.hasActual ? p.actualPayment : (BASE_PAYMENT + p.targetExtra);
+    p.suggestedTotal = BASE_PAYMENT + p.targetExtra;
   }
 
   return plan;

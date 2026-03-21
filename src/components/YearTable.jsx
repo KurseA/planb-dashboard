@@ -33,7 +33,7 @@ export default function YearTable({ month, actuals, debtPlan, onSelectMonth }) {
           {D.months.map((mo, i) => {
             const sel = i === month;
             const p = debtPlan[i];
-            const extra = p.redistributedExtra ?? p.suggestedExtra;
+            const extra = p.targetExtra;
             const isExtra = extra > 0;
             const done = p.remaining === 0;
             const st = monthStatus(actuals, i);
@@ -59,7 +59,7 @@ export default function YearTable({ month, actuals, debtPlan, onSelectMonth }) {
                 <td>{D.apMin[i].toLocaleString()}</td>
                 <td style={{ color: isExtra ? "var(--amber2)" : "var(--t5)", fontWeight: isExtra ? 600 : 400 }}>
                   {isExtra ? extra.toLocaleString() : "—"}
-                  {p.redistributedExtra && <span style={{ fontSize: 8, color: "var(--t4)" }}> *</span>}
+                  {p.targetExtra !== D.dirExtraSuggested[i] && <span style={{ fontSize: 8, color: "var(--t4)" }}> *</span>}
                 </td>
                 <td style={{ color: p.hasActual ? "var(--green2)" : "var(--t5)", fontWeight: p.hasActual ? 500 : 400 }}>
                   {p.hasActual ? p.actualPayment.toLocaleString() : "—"}

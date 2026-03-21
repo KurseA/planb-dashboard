@@ -15,7 +15,7 @@ export default function MetricCards({ month, debtPlan }) {
   const p = debtPlan[m];
   const remaining = p.remaining;
   const pctPaid = (TOTAL_DEBT - remaining) / TOTAL_DEBT * 100;
-  const suggestedExtra = p.redistributedExtra ?? p.suggestedExtra;
+  const suggestedExtra = p.targetExtra;
 
   const cards = [
     {
