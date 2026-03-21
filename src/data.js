@@ -48,29 +48,23 @@ export function calculateDebtPlan(actuals) {
     });
   }
 
-  // Pass 1: คำนวณหนี้เหลือ สมมติเดือนที่ไม่กรอกจ่ายแค่ base
-  // แล้ว redistribute ส่วนที่เหลือให้ extra slots ที่ยังไม่กรอก
-  let debtAfterBase = TOTAL_DEBT;
-  for (let m = 0; m < 12; m++) {
-    if (plan[m].hasActual) {
-      debtAfterBase = Math.max(0, debtAfterBase - plan[m].actualPayment);
-    } else {
-      debtAfterBase = Math.max(0, debtAfterBase - BASE_PAYMENT);
-    }
-  }
-  // debtAfterBase = หนี้เหลือถ้าเดือนที่ไม่กรอกจ่ายแค่ base (ไม่โปะ)
+  // Pass 1: คำนวณ targetExtra ของแต่ละเดือน — ไม่นับ actual ของตัวเอง
+  const totalExtraNeeded = TOTAL_DEBT - 12 * BASE_PAYMENT; // 2355K
 
-  const openSlots = extraMonths.filter(em => !plan[em].hasActual);
-  if (openSlots.length > 0 && debtAfterBase > 0) {
-    const perSlot = Math.ceil(debtAfterBase / openSlots.length);
-    for (const em of openSlots) {
-      plan[em].targetExtra = Math.max(perSlot, 0);
+  for (const em of extraMonths) {
+    // รวม extra ที่เดือนอื่นจ่ายแล้ว (actual - base)
+    let coveredByOthers = 0;
+    for (let m = 0; m < 12; m++) {
+      if (m === em) continue; // ข้ามตัวเอง!
+      if (plan[m].hasActual) {
+        coveredByOthers += plan[m].actualPayment - BASE_PAYMENT;
+      }
     }
-  } else if (debtAfterBase <= 0) {
-    // หนี้หมดแล้วจาก actual ที่จ่าย → ไม่ต้องโปะเพิ่ม
-    for (const em of openSlots) {
-      plan[em].targetExtra = 0;
-    }
+    const stillNeeded = Math.max(0, totalExtraNeeded - coveredByOthers);
+
+    // นับ slots: ตัวเอง + เดือนอื่นที่ยังไม่กรอก actual
+    const otherOpenSlots = extraMonths.filter(x => x !== em && !plan[x].hasActual).length;
+    plan[em].targetExtra = Math.max(0, Math.ceil(stillNeeded / (otherOpenSlots + 1)));
   }
 
   // Pass 2: คำนวณ remaining จริง — ใช้ actual ถ้ามี, ไม่งั้นใช้ targetExtra
