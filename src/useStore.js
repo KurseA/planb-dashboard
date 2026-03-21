@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { STORAGE_KEY } from "./data";
+import { supabase } from "./supabaseClient";
 
 const DEFAULT_ACTUALS = {
   0: { sales: "5266", cash: "4421", ar: "11700", ap: "3553" },
@@ -7,13 +8,18 @@ const DEFAULT_ACTUALS = {
 };
 
 const MAX_HISTORY = 50;
+const TABLE = "dashboard_state";
+const ROW_ID = "shared";
 
 export function useStore() {
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth());
   const [actuals, setActuals] = useState(() => ({ ...DEFAULT_ACTUALS }));
   const [notes, setNotes] = useState({});
   const [lastSaved, setLastSaved] = useState(null);
+  const [syncStatus, setSyncStatus] = useState("loading"); // loading | connected | offline
   const saveTimer = useRef(null);
+  const clientId = useRef(crypto.randomUUID());
+  const isRemoteUpdate = useRef(false);
 
   // Undo/Redo history
   const [history, setHistory] = useState([]);
@@ -23,7 +29,6 @@ export function useStore() {
   const canUndo = historyIndex > 0;
   const canRedo = historyIndex < history.length - 1;
 
-  // Push current state to history
   const pushHistory = useCallback((newActuals, newNotes) => {
     if (skipHistory.current) { skipHistory.current = false; return; }
     setHistory(prev => {
@@ -35,36 +40,112 @@ export function useStore() {
     setHistoryIndex(prev => Math.min(prev + 1, MAX_HISTORY - 1));
   }, [historyIndex]);
 
-  // Load from localStorage on mount
+  // Load from Supabase (primary) → fallback localStorage
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        const loadedActuals = { ...DEFAULT_ACTUALS, ...(saved.actuals || {}) };
-        const loadedNotes = saved.notes || {};
-        setActuals(loadedActuals);
-        setNotes(loadedNotes);
-        if (typeof saved.selectedMonth === "number") setSelectedMonth(saved.selectedMonth);
-        if (saved.lastSaved) setLastSaved(saved.lastSaved);
-        // Init history with loaded state
-        setHistory([{ actuals: loadedActuals, notes: loadedNotes }]);
-        setHistoryIndex(0);
-      } else {
-        setHistory([{ actuals: { ...DEFAULT_ACTUALS }, notes: {} }]);
-        setHistoryIndex(0);
+    let channel;
+
+    async function init() {
+      let loadedActuals = { ...DEFAULT_ACTUALS };
+      let loadedNotes = {};
+
+      // Try Supabase first
+      try {
+        const { data, error } = await supabase
+          .from(TABLE)
+          .select("*")
+          .eq("id", ROW_ID)
+          .single();
+
+        if (!error && data) {
+          loadedActuals = { ...DEFAULT_ACTUALS, ...(data.actuals || {}) };
+          loadedNotes = data.notes || {};
+          if (data.updated_at) setLastSaved(data.updated_at);
+          setSyncStatus("connected");
+        } else {
+          throw new Error("Supabase fetch failed");
+        }
+      } catch {
+        // Fallback to localStorage
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) {
+            const saved = JSON.parse(raw);
+            loadedActuals = { ...DEFAULT_ACTUALS, ...(saved.actuals || {}) };
+            loadedNotes = saved.notes || {};
+            if (typeof saved.selectedMonth === "number") setSelectedMonth(saved.selectedMonth);
+            if (saved.lastSaved) setLastSaved(saved.lastSaved);
+          }
+        } catch { /* ignore */ }
+        setSyncStatus("offline");
       }
-    } catch (e) {
-      setHistory([{ actuals: { ...DEFAULT_ACTUALS }, notes: {} }]);
+
+      setActuals(loadedActuals);
+      setNotes(loadedNotes);
+      setHistory([{ actuals: loadedActuals, notes: loadedNotes }]);
       setHistoryIndex(0);
+
+      // Cache to localStorage
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+          actuals: loadedActuals,
+          notes: loadedNotes,
+          selectedMonth: new Date().getMonth(),
+          lastSaved: new Date().toISOString()
+        }));
+      } catch { /* ignore */ }
+
+      // Subscribe to real-time changes
+      channel = supabase
+        .channel("dashboard-sync")
+        .on(
+          "postgres_changes",
+          { event: "UPDATE", schema: "public", table: TABLE },
+          (payload) => {
+            const remote = payload.new;
+            // Ignore own writes
+            if (remote.updated_by === clientId.current) return;
+
+            const remoteActuals = { ...DEFAULT_ACTUALS, ...(remote.actuals || {}) };
+            const remoteNotes = remote.notes || {};
+
+            isRemoteUpdate.current = true;
+            skipHistory.current = true;
+            setActuals(remoteActuals);
+            setNotes(remoteNotes);
+            setLastSaved(remote.updated_at);
+            setSyncStatus("connected");
+
+            // Update localStorage cache
+            try {
+              localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                actuals: remoteActuals,
+                notes: remoteNotes,
+                lastSaved: remote.updated_at
+              }));
+            } catch { /* ignore */ }
+
+            setTimeout(() => { isRemoteUpdate.current = false; }, 100);
+          }
+        )
+        .subscribe((status) => {
+          if (status === "SUBSCRIBED") setSyncStatus("connected");
+        });
     }
+
+    init();
+
+    return () => {
+      if (channel) supabase.removeChannel(channel);
+    };
   }, []);
 
-  // Debounced save to localStorage
+  // Save to localStorage + Supabase
   const save = useCallback((newActuals, newNotes, newMonth) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
+    saveTimer.current = setTimeout(async () => {
       const now = new Date().toISOString();
+
+      // Save to localStorage (cache/fallback)
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
           actuals: newActuals ?? actuals,
@@ -72,8 +153,29 @@ export function useStore() {
           selectedMonth: newMonth ?? selectedMonth,
           lastSaved: now
         }));
-        setLastSaved(now);
-      } catch (e) { /* ignore */ }
+      } catch { /* ignore */ }
+
+      // Save to Supabase
+      try {
+        const { error } = await supabase
+          .from(TABLE)
+          .upsert({
+            id: ROW_ID,
+            actuals: newActuals ?? actuals,
+            notes: newNotes ?? notes,
+            updated_at: now,
+            updated_by: clientId.current
+          });
+        if (!error) {
+          setSyncStatus("connected");
+        } else {
+          setSyncStatus("offline");
+        }
+      } catch {
+        setSyncStatus("offline");
+      }
+
+      setLastSaved(now);
     }, 500);
   }, [actuals, notes, selectedMonth]);
 
@@ -97,8 +199,16 @@ export function useStore() {
 
   const selectMonth = useCallback((m) => {
     setSelectedMonth(m);
-    save(actuals, notes, m);
-  }, [actuals, notes, save]);
+    // selectedMonth is local-only, just save to localStorage
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        saved.selectedMonth = m;
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(saved));
+      }
+    } catch { /* ignore */ }
+  }, []);
 
   const undo = useCallback(() => {
     if (!canUndo) return;
@@ -123,7 +233,7 @@ export function useStore() {
   }, [canRedo, historyIndex, history, selectedMonth, save]);
 
   return {
-    selectedMonth, actuals, notes, lastSaved,
+    selectedMonth, actuals, notes, lastSaved, syncStatus,
     selectMonth, updateActual, updateNote,
     undo, redo, canUndo, canRedo
   };

@@ -5,9 +5,13 @@ import { D, fmt, fmtFull, checkMetric, monthStatus, earlyWarningCheck, payoffDec
 function ActualInput({ value, onChange, placeholder = "—", disabled = false }) {
   const [local, setLocal] = useState(value);
   const inputRef = useRef(null);
+  const isFocused = useRef(false);
 
   useEffect(() => {
-    setLocal(value);
+    // Don't overwrite while user is typing (prevents remote sync from stealing focus)
+    if (!isFocused.current) {
+      setLocal(value);
+    }
   }, [value]);
 
   return (
@@ -17,6 +21,12 @@ function ActualInput({ value, onChange, placeholder = "—", disabled = false })
       value={local}
       placeholder={placeholder}
       disabled={disabled}
+      onFocus={() => { isFocused.current = true; }}
+      onBlur={() => {
+        isFocused.current = false;
+        // Sync from props if different after blur
+        if (local !== value) setLocal(value);
+      }}
       onChange={e => {
         setLocal(e.target.value);
         onChange(e.target.value);

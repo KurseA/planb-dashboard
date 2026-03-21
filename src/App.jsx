@@ -39,7 +39,18 @@ export default function App() {
       <DecisionRules />
 
       <div style={{ textAlign: "center", padding: "20px 0", fontSize: 10, color: "var(--t5)" }}>
-        Sweetchew Plan B Benchmark v2.0 — React Edition | ข้อมูลบันทึกอัตโนมัติใน browser นี้
+        <span style={{
+          display: "inline-flex", alignItems: "center", gap: 4, marginBottom: 4,
+          fontSize: 10, color: store.syncStatus === "connected" ? "var(--green)" : store.syncStatus === "offline" ? "var(--red)" : "var(--t4)"
+        }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: "50%",
+            background: store.syncStatus === "connected" ? "var(--green)" : store.syncStatus === "offline" ? "var(--red)" : "var(--t4)"
+          }} />
+          {store.syncStatus === "connected" ? "Synced" : store.syncStatus === "offline" ? "Offline" : "Loading..."}
+        </span>
+        <br />
+        Sweetchew Plan B Benchmark v2.0 — React Edition | Real-time sync
         {store.lastSaved && (
           <><br />บันทึกล่าสุด: {new Date(store.lastSaved).toLocaleString("th-TH")}</>
         )}
